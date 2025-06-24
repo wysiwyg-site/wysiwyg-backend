@@ -3,13 +3,21 @@ const fs = require('fs');
 const path = require('path');
 const cors = require('cors');
 const multer = require('multer');
-
+const jwt = require('jsonwebtoken');
 const app = express();
 const PORT = 4000;
 
 app.use(cors());
 app.use(express.json());
 app.use('/images', express.static(path.join(__dirname, 'images')));
+
+
+const JWT_SECRET = "new_keyssqww"; // Replace with a strong secret (store in .env)
+const JWT_EXPIRES_IN = '10m'; // Token valid for 10 minutes
+
+function generateToken(user) {
+  return jwt.sign(user, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
+}
 
 // Multer storage config
 const storage = multer.diskStorage({
@@ -36,11 +44,36 @@ const upload = multer({ storage }).fields([
 ]);
 
 // Helper function to build file paths
+
+app.post("/login", (req, res) => {
+  const { username, password } = req.body;
+
+  if (username === "admin" && password === "wysi@25") {
+    const token = generateToken({ username });
+    return res.json({ accessToken: token });
+  }
+
+  res.status(401).json({ error: "Invalid credentials" });
+});
+
+function verifyToken(req, res, next) {
+  const authHeader = req.headers["authorization"];
+  const token = authHeader && authHeader.split(" ")[1];
+   
+  if (!token) return res.status(401).json({ error: "Missing token" });
+
+  jwt.verify(token, JWT_SECRET, (err, user) => {
+    if (err) return res.status(403).json({ error: "Invalid or expired token" });
+    req.user = user;
+    next();
+  });
+}
+
 const buildImagePaths = (projectId, files = []) =>
   files.map(file => `/images/projects/${projectId}/${file.filename}`);
 
 // POST - Create new project
-app.post('/projects', upload, (req, res) => {
+app.post("/projects", verifyToken, upload, (req, res) => {
   const {
     project_id,
     title,
@@ -109,7 +142,13 @@ app.get('/projects', (req, res) => {
 
     try {
       const jsonData = JSON.parse(data);
-      const projects = jsonData.projects || [];
+      let projects = jsonData.projects || [];
+
+      // ✅ Sort projects alphabetically by title (case-insensitive)
+      projects.sort((a, b) =>
+        a.title.localeCompare(b.title, undefined, { sensitivity: 'base' })
+      );
+
       res.json(projects);
     } catch (parseError) {
       console.error('Error parsing JSON:', parseError);
@@ -119,7 +158,7 @@ app.get('/projects', (req, res) => {
 });
 
 // PUT - Update existing project
-app.put('/projects/:project_id', upload, (req, res) => {
+app.put("/projects/:project_id", verifyToken, upload, (req, res) => {
   const { project_id } = req.params;
   const {
     title,
@@ -234,7 +273,7 @@ if (mainImageFile) {
 });
 
 // DELETE - Remove a project
-app.delete('/projects/:project_id', (req, res) => {
+app.delete("/projects/:project_id", verifyToken, (req, res) => {
   const { project_id } = req.params;
   const portfolioPath = path.join(__dirname, 'portfolio.json');
 
